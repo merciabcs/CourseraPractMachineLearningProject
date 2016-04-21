@@ -1,0 +1,107 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Mercia Silva"
+date: "21 April 2016"
+output: html_document
+---
+
+###Introduction to the Project
+
+This project uses data from http://groupware.les.inf.puc-rio.br/har has data collected from fitness devices located on the belt, forearm, arm, and dumbell of 6 participants who were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+The goal is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. Any of the other variables can be used in the prediction.
+
+```{r, message=FALSE, warning=FALSE}
+library(caret)
+library(randomForest)
+library(rpart)
+library(rattle)
+
+```
+
+### The Data
+
+```{r}
+#download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile = "pml-training.csv")
+#download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile = "pml-testing.csv")
+train_data <- read.csv("pml-training.csv", sep = ",", na.strings = c("", "NA"))
+result_data <- read.csv("pml-testing.csv", sep = ",", na.strings = c("", "NA"))
+```
+Having a look at the data with `head(train_data,3)` the data needs to be cleaned removing all NAs
+
+```{r}
+features <- names(result_data[,colSums(is.na(result_data)) == 0])[8:59] #problem_id not on train_data AND remove factors
+
+# Only use features used in submit cases.
+train_data <- train_data[,c(features,"classe")] # include classe
+result_data <- result_data[,c(features,"problem_id")] # include problem_id
+```
+The result data is put aside and let's work only with the train data and dividing the train data into train (75%) and test (25%). 
+```{r}
+# bootstrap
+set.seed(5)
+inTrain = createDataPartition(train_data$classe, p = 0.75, list = F)
+training = train_data[inTrain,]
+testing = train_data[-inTrain,]
+```
+Using correlation to find the best features to use in the model
+```{r}
+# feature selection
+outcome = which(names(training) == "classe")
+highCorrCols = findCorrelation(abs(cor(training[,-outcome])),0.90)
+highCorrFeatures = names(training)[highCorrCols]
+highCorrFeatures
+training = training[,-highCorrCols]
+outcome = which(names(training) == "classe")
+```
+Checking the relations of each feature and which are the most important ones to this model.
+The most important features are: pitch_belt, yaw_belt, total_accel_belt, gyros_belt_x
+
+```{r}
+#feature importance
+fsRF = randomForest(training[,-outcome], training[,outcome], importance = T)
+rfImp = data.frame(fsRF$importance)
+impFeatures = order(-rfImp$MeanDecreaseGini)
+inImp = createDataPartition(train_data$classe, p = 0.05, list = F)
+featurePlot(training[inImp,impFeatures[1:4]],training$classe[inImp], plot = "pairs")
+```
+Generating/training 3 models to compare: Decision Tree Model, K-Nearest Neighbors Model and Random Forest
+```{r}
+modelKNN = train(classe ~ ., training, method = "knn", trControl = trainControl(method = "adaptive_cv"))
+modelRF = train(classe ~ ., training, method = "rf", ntree = 200, trControl = trainControl(method = "oob"))
+modelDT= train(classe ~ ., training, method="rpart")
+resultsKNN = data.frame(modelKNN$results)
+resultsRF = data.frame(modelRF$results)
+resultsDT = data.frame(modelDT$results)
+fitKNN = predict(modelKNN, testing)
+fitRF = predict(modelRF, testing)
+fitDT = predict(modelDT, testing)
+```
+
+Results for the Decision Tree Model:
+```{r}
+confusionMatrix(fitDT, testing$classe)$overall
+fancyRpartPlot(modelDT$finalModel)
+```
+
+Results for the K-Nearest Neighbors Model:
+```{r}
+confusionMatrix(fitKNN, testing$classe)$overall
+```
+
+Results for the Random Forest Model:
+```{r}
+confusionMatrix(fitRF, testing$classe)$overall
+```
+
+##Conclusion
+Thee Random Forest model with Accuracy 0.9963295 is the best performing model.
+
+##Extra
+Creating the data to submit to the project quiz:
+```{r}
+submit = predict(modelRF, result_data)
+answer = data.frame(submit)
+answer
+```
+
+
